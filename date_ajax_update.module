@@ -1,0 +1,350 @@
+<?php
+/**
+ * @file
+ * Contains core functions for the Date AJAX update module.
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function date_ajax_update_menu() {
+  $items = array();
+
+  $items['date_ajax_update/ajax/%/%/%/%/%/%'] = array(
+    'page callback' => 'date_ajax_update_ajax_callback',
+    'page arguments' => array(2, 3, 4, 5, 6, 7),
+    'access arguments' => TRUE,
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_field_formatter_info().
+ */
+function date_ajax_update_field_formatter_info() {
+  $items = array();
+
+  $items['date_ajax_update'] = array(
+    'label' => t('AJAX update'),
+    'field types' => array('date', 'datestamp', 'datetime'),
+    'settings' => array(
+      'update' => array(
+        'label' => t('Update date'),
+        'value' => 'now',
+        'relative' => '',
+      ),
+      'display' => array(
+        'formatter' => 'none',
+        'formatter_settings' => array(),
+      ),
+    ),
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_field_formatter_settings().
+ */
+function date_ajax_update_field_formatter_settings_summary($field, $instance, $view_mode) {
+  $display = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+
+  $summary = '';
+
+  if ('date_ajax_update' == $display['type']) {
+    $summary = t('Link text: @label<br />Value to set: @value<br />Formatter: @formatter', array(
+      '@label' => $settings['update']['label'],
+      '@value' => $settings['update']['value'] == 'now' ? t('Now') : $settings['update']['relative'],
+      '@formatter' => $settings['display']['formatter']
+    ));
+  }
+
+  return $summary;
+}
+
+/**
+ * Implements hook_field_formatter_settings_form().
+ */
+function date_ajax_update_field_formatter_settings_form($field, $instance, $view_mode, $form, &$form_state) {
+  $display = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+
+  $element = array();
+
+  if ('date_ajax_update' == $display['type']) {
+    // Update settings.
+    $element['update'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Update settings'),
+    );
+
+    $element['update']['label'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Link text'),
+      '#default_value' => $settings['update']['label'],
+    );
+
+    $element['update']['value'] = array(
+      '#type' => 'select',
+      '#title' => t('Value to set'),
+      '#options' => array(
+        'now' => t('Now'),
+        'strtotime' => t('Relative')
+      ),
+      '#default_value' => $settings['update']['value'],
+      '#required' => TRUE,
+    );
+
+    $element['update']['relative'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Relative value'),
+    '#description' => t("Describe a time by reference to the current day, like '+90 days' (90 days from the day the field is created) or '+1 Saturday' (the next Saturday). See !strtotime for more details.", array(
+      '!strtotime' => l(t('strtotime'), 'http://www.php.net/manual/en/function.strtotime.php'))
+    ),
+    '#default_value' => $settings['update']['relative'],
+    '#states' => array(
+      'visible' => array(
+        ':input[name$="[settings][update][value]"]' => array('value' => 'strtotime')),
+      ),
+    );
+
+    // Display settings.
+    $element['display'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Display settings'),
+    );
+
+    $options = field_ui_formatter_options($field['type']);
+    unset($options['date_ajax_update']);
+    $element['display']['formatter'] = array(
+      '#type' => 'select',
+      '#title' => t('Formatter'),
+      '#options' => $options,
+      '#empty_value' => 'none',
+      '#default_value' => $settings['display']['formatter'],
+      '#ajax' => array(
+        'callback' => 'date_ajax_update_formatter_settings_ajax',
+        'wrapper' => 'date_ajax_update-formatter_settings',
+      ),
+    );
+
+    $element['display']['formatter_settings'] = array(
+      '#type' => 'container',
+      '#prefix' => '<div id="date_ajax_update-formatter_settings">',
+      '#suffix' => '</div>',
+    );
+
+    $formatter = $settings['display']['formatter'];
+    if (isset($form_state['values']['fields'][$field['field_name']]['settings_edit_form'])) {
+      $formatter = $form_state['values']['fields'][$field['field_name']]['settings_edit_form']['settings']['display']['formatter'];
+    }
+
+    $instance['display']['default'] = field_info_formatter_types($formatter);
+    $instance['display']['default']['type'] = $formatter;
+    if (isset($settings['display']['formatter_settings'])) {
+      $instance['display']['default']['settings'] = $settings['display']['formatter_settings'];
+    }
+
+    $formatter_settings = _date_ajax_update_formatter_settings($field, $instance);
+    if ($formatter_settings) {
+      $element['display']['formatter_settings'] += $formatter_settings;
+    }
+  }
+
+  return $element;
+}
+
+/**
+ * Helper function; Returns Formatter settings form.
+ */
+function _date_ajax_update_formatter_settings($field, $instance) {
+  $summary = module_invoke($instance['display']['default']['module'], 'field_formatter_settings_summary', $field, $instance, 'default');
+  if ($summary && function_exists($function = "{$instance['display']['default']['module']}_field_formatter_settings_form")) {
+    $form_state = array();
+    return $function($field, $instance, 'default', array(), $form_state);
+  }
+  return FALSE;
+}
+
+/**
+ * AJAX Callback; Display nested formatter settings.
+ */
+function date_ajax_update_formatter_settings_ajax($form, $form_state) {
+  return $form['fields'][$form_state['formatter_settings_edit']]['format']['settings_edit_form']['settings']['display']['formatter_settings'];
+}
+
+/**
+ * Implements hook_field_formatter_view().
+ */
+function date_ajax_update_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+  $settings = $display['settings'];
+
+  if ('date_ajax_update' == $display['type']) {
+    // Add the Drupal AJAX library.
+    drupal_add_library('system', 'drupal.ajax');
+
+    // Get Bundle name and additional information from the Entity.
+    list($id, $vid, $bundle) = entity_extract_ids($entity_type, $entity);
+
+    // Get current View mode based on the display array.
+    foreach ($instance['display'] as $view_mode => $instance_display) {
+      if ($instance_display === $display) {
+        break;
+      }
+    }
+
+    // Handle sub-formatter element.
+    if ('none' != $settings['display']['formatter']) {
+      $formatter = field_info_formatter_types($settings['display']['formatter']);
+
+      $display = array(
+        'label' => 'hidden',
+        'type' => $settings['display']['formatter'],
+        'module' => $formatter['module'],
+        'settings' => $settings['display']['formatter_settings'],
+      );
+
+      // Use chosen display formatter to generate the element.
+      if (function_exists($function = "{$formatter['module']}_field_formatter_view")) {
+        $element = $function($entity_type, $entity, $field, $instance, $langcode, $items, $display);
+      }
+
+      if (is_array($element)) {
+        foreach ($element as $delta => $item) {
+          // Create the update link element.
+          $link = date_ajax_update_update_link($settings, $entity_type, $entity, $view_mode, $field['field_name'], $delta);
+
+          // Prepend update link to each child element.
+          $element[$delta]['#prefix'] = isset($element[$delta]['#prefix']) ? $element[$delta]['#prefix'] : '';
+          $element[$delta]['#prefix'] = "<span id='date_ajax_update-{$field['field_name']}-{$delta}'>";
+
+          $element[$delta]['#suffix'] = isset($element[$delta]['#suffix']) ? $element[$delta]['#suffix'] : '';
+          $element[$delta]['#suffix'] .= '</span>' . render($link);
+        }
+      }
+
+      else {
+        // Create the update link element.
+        $link = date_ajax_update_update_link($settings, $entity_type, $entity, $view_mode, $field['field_name']);
+
+        // Prepend update link to the element.
+        $element['#prefix'] = isset($element[$delta]['#prefix']) ? $element[$delta]['#prefix'] : '';
+        $element['#prefix'] = "<span id='date_ajax_update-{$field['field_name']}-0'>";
+
+        $element['#suffix'] = isset($element['#suffix']) ? $element['#suffix'] : '';
+        $element[$delta]['#suffix'] .= '</span>' . render($link);
+      }
+    }
+
+    else {
+      // Create the update link element.
+      $element[] = date_ajax_update_update_link($settings, $entity_type, $entity, $view_mode, $field['field_name']);
+    }
+  }
+
+  return $element;
+}
+
+/**
+ * Helper function; Returns a Date ajax update link element.
+ */
+function date_ajax_update_update_link($settings, $entity_type, $entity, $view_mode, $field, $delta = 0) {
+  // Access check, ensure user has edit rights to the Entity.
+  $access = TRUE;
+  if (function_exists($function = "{$entity_type}_access")) {
+    $access = $function('update', $entity);
+  }
+
+  if ($access) {
+    // Get Entity ID and additional information from the Entity.
+    list($id, $vid, $bundle) = entity_extract_ids($entity_type, $entity);
+
+    return array(
+      '#type' => 'link',
+      '#href' => "date_ajax_update/ajax/nojs/{$entity_type}/{$id}/{$view_mode}/{$field}/{$delta}",
+      '#title' => $settings['update']['label'],
+      '#options' => array(
+        'attributes' => array(
+          'class' => array('use-ajax'),
+        ),
+        'query' => drupal_get_destination(),
+      ),
+      '#prefix' => ' <span>',
+      '#suffix' => '</span>',
+    );
+  }
+
+  return array();
+}
+
+/**
+ * AJAX callback; Update date field.
+ */
+function date_ajax_update_ajax_callback($type = 'ajax', $entity_type, $entity_id, $view_mode, $field_name, $delta) {
+  $entities = entity_load($entity_type, array($entity_id));
+  $entity = $entities[$entity_id];
+
+  list($id, $vid, $bundle) = entity_extract_ids($entity_type, $entity);
+
+  $langcode = field_language($entity_type, $entity, $field_name);
+
+  $item = array();
+  $field = field_info_field($field_name);
+  $instance = field_info_instance($entity_type, $field_name, $bundle);
+
+  // Generate date.
+  $settings = $instance['display'][$view_mode]['settings'];
+  $instance['settings']['default_value'] = $settings['update']['value'];
+  $instance['settings']['default_value_code'] = $settings['update']['relative'];
+  $date = date_default_value_part($item, $field, $instance, $langcode);
+
+  // Update field value.
+  if (isset($entity->{$field_name}[$langcode][$delta]) && is_object($date)) {
+    $db_format = date_type_format($field['type']);
+    $entity->{$field_name}[$langcode][$delta]['value'] = date_format($date, $db_format);
+  }
+
+  // Save enttiy.
+  if (function_exists($function = "{$entity_type}_save")) {
+    $function($entity);
+  }
+
+  // Update frontend with Drupal AJAX command.
+  if ('ajax' == $type) {
+    $commands = array();
+
+    if ('none' != $settings['display']['formatter']) {
+      $formatter = field_info_formatter_types($settings['display']['formatter']);
+
+      $display = array(
+        'label' => 'hidden',
+        'type' => $settings['display']['formatter'],
+        'module' => $formatter['module'],
+        'settings' => $settings['display']['formatter_settings'],
+      );
+
+      // Use chosen display formatter to generate the element.
+      if (function_exists($function = "{$formatter['module']}_field_formatter_view")) {
+        $element = $function($entity_type, $entity, $field, $instance, $langcode, array($entity->{$field_name}[$langcode][$delta]), $display);
+      }
+
+      $commands[] = ajax_command_replace("#date_ajax_update-{$field_name}-{$delta}", render($element));
+    }
+
+    $element = array(
+      '#type' => 'ajax',
+      '#commands' => $commands,
+    );
+
+    ajax_deliver($element);
+  }
+
+  // Redirect back to page for noJS handling.
+  else {
+    drupal_goto();
+  }
+}

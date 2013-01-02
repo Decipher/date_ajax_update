@@ -1,0 +1,5 @@
+name = Date AJAX update
+description = Adds a formatter allowing Date fields to be updated via AJAX.
+dependencies[] = date_api
+package = Date/Time
+core = 7.x

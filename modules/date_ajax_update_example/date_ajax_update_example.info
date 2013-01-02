@@ -1,0 +1,10 @@
+name = Date AJAX update example
+description = Example feature for the Date AJAX update module.
+core = 7.x
+package = Features
+dependencies[] = date
+dependencies[] = date_popup
+dependencies[] = date_ajax_update
+dependencies[] = features
+features[features_api][] = api:1
+features[field][] = node-article-field_date
